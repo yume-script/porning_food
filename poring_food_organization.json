@@ -1,5 +1,7 @@
 {
   "company_name": "포링푸드 (Poring Food)",
+  "main_product": "포링 젤리",
+  "product_description": "말랑말랑 쫀득한 식감의 대표 간식. 길드원들이 나누는 대화 한 마디 한 마디가 모여 젤리 한 알이 완성된다는 컨셉의 제품",
   "departments": [
     {
       "dept_name": "생산부",

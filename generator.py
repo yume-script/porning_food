@@ -11,6 +11,7 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     애순이의 인간적인 희노애락이 담긴 1인칭 보고서를 생성합니다.
     """
     count, progress = stats # 생산량 통계 언패킹
+    main_product = org_data.get("main_product", "포링 젤리")
     
     now = datetime.now()
     current_time_str = f"{now.strftime('%Y-%m-%d')} {now.hour:02d}:00 {time_tag}"
@@ -28,7 +29,8 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
         f"- 현재 활동: {activity}\n"
         f"- 현재 심리: {focus}\n"
         f"- 현재 날씨: {weather_info}\n"
-        f"- 현재 생산 현황: {count}건 달성 (목표 대비 {progress}%)\n\n"
+        f"- 우리 회사 주력 제품: {main_product}\n"
+        f"- 현재 생산 현황: {main_product} {count}건 달성 (목표 대비 {progress}%)\n\n"
         "--- [애순이의 캐릭터 특징] ---\n"
         "1. 주 6일 근무하는 생산부 대리. 업무 스트레스와 일상의 소소한 행복(커피, 농담 등)을 동시에 느낀다.\n"
         "2. 게임 '라그나로크M' 중독자이자 버스 승객. 채팅창에서만 열정적이고 현생에서는 피곤하다.\n"
@@ -83,7 +85,7 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     # Fallback 로직도 동일하게 mood를 반영
     fallback_narrative = (
         f"어제 {issue.get('title', '일')}은 해결된 것 같은데, 오늘도 {location}에서 {activity}라니... "
-        f"기분은 '{mood}'지만, 생산률 {progress}%인 상태로 오늘도 힘내서 채팅창에 '버스 부탁드려요!'라고 올리고 버텨봅니다."
+        f"기분은 '{mood}'지만, {main_product} 생산률 {progress}%인 상태로 오늘도 힘내서 채팅창에 '버스 부탁드려요!'라고 올리고 버텨봅니다."
     )
     fallback_game_status = "버스 탑승 대기 중, 채팅창 밑밥 깔기 시전"
     fallback_cynical = "희노애락 다 겪어도 결국 생산량 채우고 퇴근 후엔 라그나로크뿐이다."

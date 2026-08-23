@@ -309,6 +309,7 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
     location, activity, focus, state, _ = get_aesun_detailed_schedule()
     last_issue = get_last_issue()
     prev_context = f"이전 사건: '{last_issue['title']}' / 상황: {last_issue['description']}" if last_issue else "최근 특별한 사건 없음."
+    main_product = org_data.get("main_product", "포링 젤리")
     
     all_members = []
     for dept in org_data["departments"]:
@@ -338,6 +339,7 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
 
     prompt = (
         f"너는 '포링푸드'의 인간미 넘치는 애순이다.\n"
+        f"우리 회사의 주력 생산 제품: {main_product}\n"
         f"현재 상황: {location}에서 {activity} 중.\n"
         f"오늘 날씨: {weather_info}\n"
         f"포링푸드 공장 가동 상태: {factory_status}\n"
@@ -350,7 +352,8 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
         "2. 오늘 이야기의 중심 소재는 완전히 자유롭게 골라라 - 회사 업무/사내 정치일 필요는 전혀 없다. "
         "위에 '오늘의 화제'가 주어졌다면 그것을 중심 소재로 삼아도 좋고, 날씨 이야기, "
         "애순이의 개인적인 일상(출퇴근길 관찰, 점심 메뉴 고민, 어제 본 영화나 응원하는 팀 경기 결과, "
-        "라그M 이야기)만으로 이야기를 이끌어가도 좋다. "
+        "라그M 이야기)만으로 이야기를 이끌어가도 좋다. 회사 이야기를 할 때는 자연스럽게 "
+        f"'{main_product}' 생산/품질/포장/맛 관련 소재를 곁들여도 좋다 (매번 그럴 필요는 없다). "
         "위에 나열한 조연 후보들은 등장이 필수가 아니다 - 오늘 이야기에 자연스럽게 어울리면 "
         "대화 상대나 배경으로 살짝 등장시키고, 안 어울리면 아예 등장시키지 않아도 된다.\n"
         "3. **중요: 화제나 회사 상황이 다소 무겁거나 아쉬운 내용이어도 비관적으로만 쓰지 마라. "
