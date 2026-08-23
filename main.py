@@ -63,7 +63,7 @@ def main():
 
     # 실시간 이슈 생성
     print("[2/4] 조직도 기반 동적 이슈 생성 중...")
-    dynamic_issue = processor.generate_dynamic_issue(org_data, weather_info, factory_status=factory_msg)
+    dynamic_issue = processor.generate_dynamic_issue(org_data, weather_info, factory_status=factory_msg, our_count=prod_count)
 
     # 애순이 페르소나 주입 및 보고서 변환 (생산 통계 + 기분 반영)
     print("[3/4] 애순이 시점으로 보고서 변환 중...")

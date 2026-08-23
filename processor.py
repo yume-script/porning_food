@@ -63,6 +63,106 @@ def get_production_stats():
     progress = (count / DAILY_TARGET) * 100 if DAILY_TARGET > 0 else 0
     return count, round(progress, 1)
 
+
+# =============================================================================
+# 경쟁사 비교 (업계 동향 - 회사일에 대한 경각심)
+# =============================================================================
+RIVALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rival_companies.json")
+
+
+def _load_rivals() -> list:
+    if os.path.exists(RIVALS_PATH):
+        try:
+            with open(RIVALS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f).get("rivals", [])
+        except Exception as e:
+            print(f"[경고] 경쟁사 데이터 로드 실패: {e}")
+    return []
+
+
+def _count_today_messages_in_room(room_id: str) -> int:
+    """
+    특정 room_id의 katalk_log에서 오늘자 메시지 수를 센다.
+    "특정 게시판의 갱신을 경쟁사 성과율로 비교"하는 용도 - 여기서는 길드 필터 없이
+    그 채널(게시판) 자체의 활동량을 그대로 경쟁사 지표로 사용한다.
+    """
+    path = os.path.join(KATALK_LOG_DIR, f"log_{room_id}.jsonl")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    count = 0
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("timestamp", "").startswith(today_str):
+                        count += 1
+        except Exception as e:
+            print(f"[경고] 경쟁사 벤치마크 로그 분석 실패: {e}")
+    return count
+
+
+def get_rival_performance_report(our_count: int) -> list:
+    """
+    경쟁사별 오늘의 성과 지표를 계산해서 우리 실적(our_count)과 비교한 리스트로 반환.
+    - benchmark_room_id가 설정된 경쟁사: 그 채널(게시판)의 실제 오늘자 메시지 수를 그대로 사용 (실측)
+    - 설정 안 된 경쟁사: 날짜+회사명 시드 기반이라 같은 날엔 항상 같은 값 (추정 시뮬레이션,
+      하루 안에서 실행할 때마다 들쭉날쭉하지 않게 함)
+    """
+    rivals = _load_rivals()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    report = []
+
+    for rival in rivals:
+        name = rival.get("name", "이름 없는 경쟁사")
+        product = rival.get("product", "정체불명의 제품")
+        flavor = rival.get("flavor", "")
+        benchmark_room = rival.get("benchmark_room_id")
+
+        if benchmark_room:
+            performance = _count_today_messages_in_room(str(benchmark_room))
+            source = "실측"
+        else:
+            rnd = random.Random(f"{name}-{today_str}")
+            base = max(our_count, 10)
+            performance = int(base * rnd.uniform(0.6, 1.4))
+            source = "추정"
+
+        report.append({
+            "name": name,
+            "product": product,
+            "flavor": flavor,
+            "performance": performance,
+            "delta_vs_us": performance - our_count,
+            "source": source,
+        })
+
+    return report
+
+
+def _format_rival_block(rival_report: list) -> str:
+    if not rival_report:
+        return ""
+    lines = []
+    for r in rival_report:
+        if r["delta_vs_us"] > 0:
+            cmp_word = f"우리보다 {r['delta_vs_us']}건 앞서고"
+        elif r["delta_vs_us"] < 0:
+            cmp_word = f"우리보다 {-r['delta_vs_us']}건 뒤처지고"
+        else:
+            cmp_word = "우리와 정확히 동률이고"
+        lines.append(f"- {r['name']}({r['product']}): 오늘 지표 {r['performance']}건, {cmp_word} 있음")
+    joined = "\n".join(lines)
+    return (
+        f"\n[업계 동향 - 경쟁사 오늘의 성과]\n{joined}\n"
+        "이 경쟁 구도를 이야기에 살짝 긴장감이나 경각심으로 녹여내도 좋다 "
+        "(단, 애순이 특유의 낙천적인 태도는 잃지 않게 - 매번 심각하게 다룰 필요는 없다).\n"
+    )
+
 def fetch_gwangju_weather():
     """Gemini-search 모델을 이용해 현재 광주광역시의 실시간 날씨를 조회합니다."""
     if not API_URL or not LITELLM_MASTER_KEY:
@@ -205,7 +305,7 @@ def fetch_daily_topic():
     return None
 
 
-def generate_dynamic_issue(org_data, weather_info, factory_status):
+def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
     location, activity, focus, state, _ = get_aesun_detailed_schedule()
     last_issue = get_last_issue()
     prev_context = f"이전 사건: '{last_issue['title']}' / 상황: {last_issue['description']}" if last_issue else "최근 특별한 사건 없음."
@@ -232,6 +332,10 @@ def generate_dynamic_issue(org_data, weather_info, factory_status):
             "그냥 '아 이런 거 봤는데' 수준의 개인적인 감상/잡담으로 등장해도 좋다).\n"
         )
 
+    # 경쟁사 동향 - 날씨처럼 항상 배경정보로 곁들임 (회사일에 대한 경각심)
+    rival_report = get_rival_performance_report(our_count)
+    rival_block = _format_rival_block(rival_report)
+
     prompt = (
         f"너는 '포링푸드'의 인간미 넘치는 애순이다.\n"
         f"현재 상황: {location}에서 {activity} 중.\n"
@@ -239,7 +343,8 @@ def generate_dynamic_issue(org_data, weather_info, factory_status):
         f"포링푸드 공장 가동 상태: {factory_status}\n"
         f"{prev_context}\n"
         f"등장 가능한 조연 후보(선택사항): {', '.join(selected)}\n"
-        f"{topic_block}\n"
+        f"{topic_block}"
+        f"{rival_block}\n"
         "작성 규칙:\n"
         "1. 이전 사건이 진행 중이라면 해결책을 제시하고, 이미 해결되었다면 그 후일담을 짧게 언급해라.\n"
         "2. 오늘 이야기의 중심 소재는 완전히 자유롭게 골라라 - 회사 업무/사내 정치일 필요는 전혀 없다. "
@@ -254,7 +359,10 @@ def generate_dynamic_issue(org_data, weather_info, factory_status):
         "다채롭게 느끼며 사는 평범한 사람이다. 영화를 보고 여운에 잠기기도 하고, 좋아하는 "
         "스포츠팀 결과에 일희일비하기도 하고, 날씨 하나에 기분이 오락가락하기도 하는 등 "
         "회사/게임 밖의 감정도 자연스럽게 드러내라.\n"
-        "5. 반드시 JSON 형식으로만 응답: {\"title\": \"...\", \"description\": \"...\"}"
+        "5. [업계 동향]이 주어졌다면, 그 경쟁 구도를 가볍게 언급하며 '우리도 정신 차려야겠다'는 "
+        "식의 자기 다짐이나 유머러스한 위기감으로 녹여내도 좋다 (매번 그럴 필요는 없고, "
+        "오늘 이야기 소재와 안 어울리면 생략해도 된다).\n"
+        "6. 반드시 JSON 형식으로만 응답: {\"title\": \"...\", \"description\": \"...\"}"
     )
 
     try:
