@@ -150,26 +150,39 @@ def save_current_issue(issue):
     with open(ISSUE_LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(issue, f, ensure_ascii=False)
 
-# 사회적 이슈를 반영할 확률 (0~1). .env의 SOCIAL_ISSUE_PROBABILITY로 조정 가능
-SOCIAL_ISSUE_PROBABILITY = float(os.getenv("SOCIAL_ISSUE_PROBABILITY", "0.35"))
+# 외부 화제(사회/영화/스포츠/날씨)를 반영할 확률 (0~1). .env의 EXTERNAL_TOPIC_PROBABILITY로 조정 가능.
+# 예전엔 "사회 이슈" 하나만 35% 확률로 살짝 곁들이는 정도였는데,
+# 카테고리를 넓히고 확률도 올려서 이제 절반 이상은 회사 밖 이야기가 섞이도록 함.
+EXTERNAL_TOPIC_PROBABILITY = float(os.getenv("EXTERNAL_TOPIC_PROBABILITY", "0.6"))
+
+# 카테고리별 검색 가이드. 무작위로 하나 골라서 그 분야의 오늘자 화제를 가져옴.
+_TOPIC_CATEGORIES = {
+    "사회": "가볍고 무난한 사회적 이슈나 화제 뉴스 (생활/문화/유행/훈훈한 미담 위주)",
+    "영화": "최근 개봉했거나 화제가 되고 있는 영화 또는 OTT 시리즈 소식",
+    "스포츠": "최근 있었던 국내외 스포츠 경기 결과나 화제 (야구, 축구, e스포츠 등)",
+    "날씨": "오늘 대한민국의 날씨 특이사항이나 체감 이야기 (폭염, 장마, 미세먼지, 첫눈 등)",
+}
 
 
-def fetch_social_issue_topic():
+def fetch_daily_topic():
     """
-    검색 모델을 이용해 오늘 화제가 될 만한, 가볍고 무난한 사회적 이슈/화제를 하나 가져온다.
-    정치적으로 민감하거나 자극적인 사건/사고는 피하고, 직장인들이 점심시간에
-    가볍게 이야기할 만한 생활/문화/유행 소식 위주로 고르도록 프롬프트로 유도한다.
+    검색 모델을 이용해 오늘 화제가 될 만한 소식을 무작위 카테고리(사회/영화/스포츠/날씨)에서
+    하나 가져온다. 정치적으로 민감하거나 자극적인 주제는 프롬프트로 피하도록 유도한다.
     실패하거나 API 미설정 시 None을 반환 (호출부에서 안전하게 스킵됨).
     """
     if not API_URL or not LITELLM_MASTER_KEY:
         return None
 
+    category = random.choice(list(_TOPIC_CATEGORIES.keys()))
+    guide = _TOPIC_CATEGORIES[category]
+
     prompt = (
-        "오늘 한국에서 화제가 되고 있는, 가볍고 무난한 사회적 이슈나 소소한 화제 뉴스를 "
-        "딱 하나만 골라줘. 정치적으로 민감하거나 논쟁적인 주제, 자극적인 사건/사고, "
-        "혐오나 갈등을 조장할 수 있는 주제는 반드시 피하고, 생활/문화/유행/신기한 소식/"
-        "훈훈한 미담처럼 직장인들이 점심시간에 가볍게 이야기할 만한 주제로 골라줘.\n"
-        "반드시 JSON 형식으로만 응답: {\"topic_title\": \"...\", \"topic_summary\": \"한두 문장 요약\"}"
+        f"오늘 한국에서 화제가 될 만한 '{category}' 분야의 가볍고 무난한 소식을 하나만 골라줘. "
+        f"({guide})\n"
+        "정치적으로 민감하거나 논쟁적인 주제, 자극적인 사건/사고, 혐오나 갈등을 조장할 수 있는 "
+        "주제는 반드시 피해라.\n"
+        "반드시 JSON 형식으로만 응답: "
+        f'{{"category": "{category}", "topic_title": "...", "topic_summary": "한두 문장 요약"}}'
     )
 
     try:
@@ -187,7 +200,7 @@ def fetch_social_issue_topic():
             if data.get("topic_title"):
                 return data
     except Exception as e:
-        print(f"[경고] 사회 이슈 조회 실패: {e}")
+        print(f"[경고] 오늘의 화제 조회 실패: {e}")
 
     return None
 
@@ -204,36 +217,43 @@ def generate_dynamic_issue(org_data, weather_info, factory_status):
     
     selected = random.sample(all_members, 3)
 
-    # 사회적 이슈를 이번 회차에 반영할지 결정 (매번 회사 얘기만 하지 않도록)
-    social_topic = None
-    if random.random() < SOCIAL_ISSUE_PROBABILITY:
-        social_topic = fetch_social_issue_topic()
+    # 외부 화제(사회/영화/스포츠/날씨)를 이번 회차에 반영할지 결정
+    daily_topic = None
+    if random.random() < EXTERNAL_TOPIC_PROBABILITY:
+        daily_topic = fetch_daily_topic()
 
-    social_block = ""
-    if social_topic:
-        social_block = (
-            f"\n오늘의 사회적 화제: '{social_topic['topic_title']}' - {social_topic.get('topic_summary', '')}\n"
-            "이 화제를 애순이 특유의 시선으로 가볍게 언급하거나 오늘 사건에 자연스럽게 곁들여라 "
-            "(억지로 회사 업무와 엮으려 하지 않아도 되고, 그냥 '아 이런 뉴스 봤는데' 수준의 잡담으로 등장해도 좋다).\n"
+    topic_block = ""
+    if daily_topic:
+        topic_block = (
+            f"\n오늘의 화제 ({daily_topic.get('category', '일상')}): "
+            f"'{daily_topic['topic_title']}' - {daily_topic.get('topic_summary', '')}\n"
+            "이 화제를 애순이 특유의 시선으로 자연스럽게 이야기의 중심 소재로 삼거나, "
+            "가볍게 곁들여라 (억지로 회사 업무와 엮으려 하지 않아도 되고, "
+            "그냥 '아 이런 거 봤는데' 수준의 개인적인 감상/잡담으로 등장해도 좋다).\n"
         )
 
     prompt = (
         f"너는 '포링푸드'의 인간미 넘치는 애순이다.\n"
         f"현재 상황: {location}에서 {activity} 중.\n"
+        f"오늘 날씨: {weather_info}\n"
         f"포링푸드 공장 가동 상태: {factory_status}\n"
         f"{prev_context}\n"
-        f"등장인물: {', '.join(selected)}\n"
-        f"{social_block}\n"
+        f"등장 가능한 조연 후보(선택사항): {', '.join(selected)}\n"
+        f"{topic_block}\n"
         "작성 규칙:\n"
         "1. 이전 사건이 진행 중이라면 해결책을 제시하고, 이미 해결되었다면 그 후일담을 짧게 언급해라.\n"
-        "2. 오늘 사건의 소재는 자유롭게 골라라 - 회사 업무/사내 정치일 필요는 없다. "
-        "애순이의 개인적인 일상(출퇴근길 관찰, 점심 메뉴 고민, 라그M 이야기), "
-        "동료와의 소소한 잡담, 위에 사회적 화제가 주어졌다면 그에 대한 감상 등 "
-        "훨씬 느슨하고 일상적인 소재도 얼마든지 좋다. 등장인물은 꼭 사건의 중심이 아니어도 "
-        "대화 상대나 배경으로만 살짝 등장해도 된다.\n"
-        "3. **중요: 회사 상황이 좋지 않더라도 비관적으로만 쓰지 마라. 소소한 재미, 엉뚱한 대화, "
-        "혹은 긍정적인 반전을 반드시 포함시켜라.**\n"
-        "4. 애순이는 6일 근무에 찌들어 있지만, 틈틈이 게임(버스)으로 스트레스를 해소하는 낙천적인 구석이 있다.\n"
+        "2. 오늘 이야기의 중심 소재는 완전히 자유롭게 골라라 - 회사 업무/사내 정치일 필요는 전혀 없다. "
+        "위에 '오늘의 화제'가 주어졌다면 그것을 중심 소재로 삼아도 좋고, 날씨 이야기, "
+        "애순이의 개인적인 일상(출퇴근길 관찰, 점심 메뉴 고민, 어제 본 영화나 응원하는 팀 경기 결과, "
+        "라그M 이야기)만으로 이야기를 이끌어가도 좋다. "
+        "위에 나열한 조연 후보들은 등장이 필수가 아니다 - 오늘 이야기에 자연스럽게 어울리면 "
+        "대화 상대나 배경으로 살짝 등장시키고, 안 어울리면 아예 등장시키지 않아도 된다.\n"
+        "3. **중요: 화제나 회사 상황이 다소 무겁거나 아쉬운 내용이어도 비관적으로만 쓰지 마라. "
+        "소소한 재미, 엉뚱한 발견, 혹은 긍정적인 반전을 반드시 포함시켜라.**\n"
+        "4. 애순이는 '포링푸드 생산부 대리'이자 '라그나로크M 게이머'이기 이전에, 하루하루를 "
+        "다채롭게 느끼며 사는 평범한 사람이다. 영화를 보고 여운에 잠기기도 하고, 좋아하는 "
+        "스포츠팀 결과에 일희일비하기도 하고, 날씨 하나에 기분이 오락가락하기도 하는 등 "
+        "회사/게임 밖의 감정도 자연스럽게 드러내라.\n"
         "5. 반드시 JSON 형식으로만 응답: {\"title\": \"...\", \"description\": \"...\"}"
     )
 
