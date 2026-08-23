@@ -1,4 +1,5 @@
 import random
+import re
 import requests
 import json
 import os
@@ -10,29 +11,55 @@ from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL, SEARCH_MODEL
 load_dotenv()
 
 ISSUE_LOG_FILE = "last_issue.json"
-LOG_FILE_PATH = "/mnt/discord_bot/katalk_log/log_18221226698539974.jsonl"
+KATALK_LOG_DIR = "/mnt/discord_bot/katalk_log"
+# 이 길드(디스코드 서버) 전체로 들어오는 입력을 "고객의 요청사항"으로 간주.
+# https://discord.com/channels/{길드ID}/{채널ID} 에서 길드ID 부분.
+TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID", "591180628842774550")
 DAILY_TARGET = int(os.getenv("DAILY_TARGET_PRODUCTION", 1000))
 
+# 원본(오늘자가 계속 쌓이는) 로그 파일명 패턴: log_{room_id}.jsonl
+# katalk_to_rag_bridge.py가 만드는 월별 아카이브(log_{room_id}_{yyyymm}.jsonl)는
+# 과거 데이터라서 "오늘" 통계에 넣으면 안 되므로 이 패턴에서 제외됨.
+_LIVE_LOG_FILENAME_RE = re.compile(r"^log_(\d+)\.jsonl$")
+
+
 def get_production_stats():
-    """오늘 날짜의 메시지 로그 수를 계산하여 진행률 반환"""
+    """
+    특정 길드(TARGET_GUILD_ID) 전체 채널로 들어온 오늘자 메시지를 전부
+    "고객의 요청사항"으로 간주해 개수를 세고, 목표 대비 진행률을 계산한다.
+    (기존에는 카톡방 하나(log_18221226698539974.jsonl)만 셌었음)
+    """
     today_str = datetime.now().strftime("%Y-%m-%d")
     count = 0
-    
+
     try:
-        if os.path.exists(LOG_FILE_PATH):
-            with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip(): continue
-                    try:
-                        entry = json.loads(line)
-                        timestamp_str = entry.get("timestamp", "")
-                        if timestamp_str.startswith(today_str):
-                            count += 1
-                    except json.JSONDecodeError:
-                        continue
+        if os.path.isdir(KATALK_LOG_DIR):
+            for fname in os.listdir(KATALK_LOG_DIR):
+                if not _LIVE_LOG_FILENAME_RE.match(fname):
+                    continue  # 월별 아카이브 등은 제외, 원본 로그만 스캔
+
+                fpath = os.path.join(KATALK_LOG_DIR, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+
+                            if entry.get("guild_id") != TARGET_GUILD_ID:
+                                continue
+
+                            timestamp_str = entry.get("timestamp", "")
+                            if timestamp_str.startswith(today_str):
+                                count += 1
+                except Exception as e:
+                    print(f"[경고] {fname} 분석 중 오류: {e}")
     except Exception as e:
-        print(f"[경고] 로그 분석 중 오류 발생: {e}")
-    
+        print(f"[경고] 로그 디렉토리 스캔 중 오류: {e}")
+
     progress = (count / DAILY_TARGET) * 100 if DAILY_TARGET > 0 else 0
     return count, round(progress, 1)
 
