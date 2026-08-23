@@ -123,6 +123,48 @@ def save_current_issue(issue):
     with open(ISSUE_LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(issue, f, ensure_ascii=False)
 
+# 사회적 이슈를 반영할 확률 (0~1). .env의 SOCIAL_ISSUE_PROBABILITY로 조정 가능
+SOCIAL_ISSUE_PROBABILITY = float(os.getenv("SOCIAL_ISSUE_PROBABILITY", "0.35"))
+
+
+def fetch_social_issue_topic():
+    """
+    검색 모델을 이용해 오늘 화제가 될 만한, 가볍고 무난한 사회적 이슈/화제를 하나 가져온다.
+    정치적으로 민감하거나 자극적인 사건/사고는 피하고, 직장인들이 점심시간에
+    가볍게 이야기할 만한 생활/문화/유행 소식 위주로 고르도록 프롬프트로 유도한다.
+    실패하거나 API 미설정 시 None을 반환 (호출부에서 안전하게 스킵됨).
+    """
+    if not API_URL or not LITELLM_MASTER_KEY:
+        return None
+
+    prompt = (
+        "오늘 한국에서 화제가 되고 있는, 가볍고 무난한 사회적 이슈나 소소한 화제 뉴스를 "
+        "딱 하나만 골라줘. 정치적으로 민감하거나 논쟁적인 주제, 자극적인 사건/사고, "
+        "혐오나 갈등을 조장할 수 있는 주제는 반드시 피하고, 생활/문화/유행/신기한 소식/"
+        "훈훈한 미담처럼 직장인들이 점심시간에 가볍게 이야기할 만한 주제로 골라줘.\n"
+        "반드시 JSON 형식으로만 응답: {\"topic_title\": \"...\", \"topic_summary\": \"한두 문장 요약\"}"
+    )
+
+    try:
+        headers = {"Authorization": f"Bearer {LITELLM_MASTER_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": SEARCH_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.5,
+            "response_format": {"type": "json_object"}
+        }
+        res = requests.post(API_URL, json=payload, headers=headers, timeout=15)
+        if res.status_code == 200:
+            content = res.json()["choices"][0]["message"]["content"]
+            data = json.loads(content)
+            if data.get("topic_title"):
+                return data
+    except Exception as e:
+        print(f"[경고] 사회 이슈 조회 실패: {e}")
+
+    return None
+
+
 def generate_dynamic_issue(org_data, weather_info, factory_status):
     location, activity, focus, state, _ = get_aesun_detailed_schedule()
     last_issue = get_last_issue()
@@ -134,17 +176,36 @@ def generate_dynamic_issue(org_data, weather_info, factory_status):
             all_members.append(f"{member.get('prefix', '')} {member['name']} {member['rank']}")
     
     selected = random.sample(all_members, 3)
-    
+
+    # 사회적 이슈를 이번 회차에 반영할지 결정 (매번 회사 얘기만 하지 않도록)
+    social_topic = None
+    if random.random() < SOCIAL_ISSUE_PROBABILITY:
+        social_topic = fetch_social_issue_topic()
+
+    social_block = ""
+    if social_topic:
+        social_block = (
+            f"\n오늘의 사회적 화제: '{social_topic['topic_title']}' - {social_topic.get('topic_summary', '')}\n"
+            "이 화제를 애순이 특유의 시선으로 가볍게 언급하거나 오늘 사건에 자연스럽게 곁들여라 "
+            "(억지로 회사 업무와 엮으려 하지 않아도 되고, 그냥 '아 이런 뉴스 봤는데' 수준의 잡담으로 등장해도 좋다).\n"
+        )
+
     prompt = (
         f"너는 '포링푸드'의 인간미 넘치는 애순이다.\n"
         f"현재 상황: {location}에서 {activity} 중.\n"
         f"포링푸드 공장 가동 상태: {factory_status}\n"
         f"{prev_context}\n"
-        f"등장인물: {', '.join(selected)}\n\n"
+        f"등장인물: {', '.join(selected)}\n"
+        f"{social_block}\n"
         "작성 규칙:\n"
         "1. 이전 사건이 진행 중이라면 해결책을 제시하고, 이미 해결되었다면 그 후일담을 짧게 언급해라.\n"
-        "2. 위 등장인물들과 얽힌 새로운 사건을 구성해라.\n"
-        "3. **중요: 공장 상태가 좋지 않더라도 비관적으로만 쓰지 마라. 그 안에서 발견한 소소한 재미, 동료와의 엉뚱한 대화, 혹은 긍정적인 반전을 반드시 포함시켜라.**\n"
+        "2. 오늘 사건의 소재는 자유롭게 골라라 - 회사 업무/사내 정치일 필요는 없다. "
+        "애순이의 개인적인 일상(출퇴근길 관찰, 점심 메뉴 고민, 라그M 이야기), "
+        "동료와의 소소한 잡담, 위에 사회적 화제가 주어졌다면 그에 대한 감상 등 "
+        "훨씬 느슨하고 일상적인 소재도 얼마든지 좋다. 등장인물은 꼭 사건의 중심이 아니어도 "
+        "대화 상대나 배경으로만 살짝 등장해도 된다.\n"
+        "3. **중요: 회사 상황이 좋지 않더라도 비관적으로만 쓰지 마라. 소소한 재미, 엉뚱한 대화, "
+        "혹은 긍정적인 반전을 반드시 포함시켜라.**\n"
         "4. 애순이는 6일 근무에 찌들어 있지만, 틈틈이 게임(버스)으로 스트레스를 해소하는 낙천적인 구석이 있다.\n"
         "5. 반드시 JSON 형식으로만 응답: {\"title\": \"...\", \"description\": \"...\"}"
     )
