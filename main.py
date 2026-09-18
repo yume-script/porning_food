@@ -1,5 +1,6 @@
 import os
 import json
+import random
 from datetime import datetime
 
 import loader
@@ -7,6 +8,78 @@ import processor
 import generator
 import notifier
 import checker
+import characters
+from config import INTERACTION_HOURS
+
+
+def _run_world_tick(aesun_status: dict) -> None:
+    """
+    [신규] 애순이 파이프라인이 끝난 뒤 호출한다 - 애순이를 제외한 전원의 상태를 갱신하고,
+    지정된 시각(INTERACTION_HOURS, 기본 하루 3번)에만 같은 장소에 있는 두 인물을 찾아
+    LLM으로 짧은 상호작용 이벤트를 만든다(그 외 시간엔 LLM 호출 없이 상태만 갱신).
+    """
+    now = datetime.now()
+    rnd = random.Random(now.strftime("%Y-%m-%d-%H"))  # 시간대별 고정, 애순이 스케줄 시드와 동일 방식
+
+    roster = characters.load_roster()
+    if not roster:
+        print("[경고] 조직도를 못 읽어서 다인물 틱을 건너뜁니다.")
+        return
+    roster_map = characters.roster_by_id(roster)
+
+    aesun_state = {
+        "location": aesun_status.get("location"),
+        "activity": aesun_status.get("activity"),
+        "state": aesun_status.get("state"),
+        "updated_at": now.isoformat(),
+    }
+    states = characters.update_all_states(roster, rnd, aesun_state=aesun_state)
+    print(f"[다인물] {len(states)}명 상태 갱신 완료")
+
+    # 애순이가 아닌 인물들의 상태도 히스토리에 한 줄씩 남긴다 (LLM 없이, 가벼움)
+    for cid, info in states.items():
+        name = info.get("name", cid)
+        if name == "애순이":
+            continue
+        characters.append_character_history(name, {
+            "timestamp": now.isoformat(),
+            "time_tag": processor.get_time_tag(),
+            "location": info.get("location"),
+            "activity": info.get("activity"),
+            "state": info.get("state"),
+        })
+
+    if now.hour not in INTERACTION_HOURS:
+        return
+
+    pair = characters.find_colocated_pair(states, rnd)
+    if not pair:
+        print("[다인물] 이번 시각엔 같은 장소에 있는 인물 쌍이 없어 상호작용을 건너뜁니다.")
+        return
+
+    print(f"[다인물] 상호작용 시도: {pair[0]} x {pair[1]}")
+    result = characters.generate_interaction(pair, states, roster_map)
+    if not result:
+        print("[다인물] 상호작용 생성 실패 (LLM 미설정이거나 오류)")
+        return
+
+    episode_text = (
+        f"👥 [{result['location']}에서 우연히] {result['participants'][0]} x {result['participants'][1]}\n"
+        f"{result['episode']}"
+    )
+    for name in result["participants"]:
+        characters.append_character_history(name, {
+            "timestamp": now.isoformat(),
+            "time_tag": processor.get_time_tag(),
+            "location": result["location"],
+            "activity": f"{result['participants'][1] if name == result['participants'][0] else result['participants'][0]}와 상호작용",
+            "state": "상호작용 중",
+            "narrative": result["episode"],
+        })
+
+    notifier.send_to_discord(episode_text)
+    notifier.send_to_local_bot(episode_text)
+    print(f"[다인물] 상호작용 전송 완료: {episode_text}")
 
 
 def main():
@@ -15,6 +88,7 @@ def main():
     1. 스케줄 확인 및 생산량 통계/서버 상태 점검
     2. 자는 중이면 상태 업데이트 후 종료
     3. 깨어있으면 날씨/공장상태/이슈 생성/보고서 작성/전송
+    4. [신규] 애순이 외 인물들의 세계도 같이 굴린다 (다인물 시뮬레이션)
     """
     # 1. 현재 스케줄 및 상태 확인
     location, activity, focus, state, is_sleeping = processor.get_aesun_detailed_schedule()
@@ -46,6 +120,7 @@ def main():
         }
         notifier.save_to_file(status_payload)
         notifier.append_to_history(status_payload)
+        _run_world_tick(status_payload)
         return
 
     # 3. 깨어있는 시간일 경우: 전체 파이프라인 실행
@@ -91,6 +166,7 @@ def main():
         # 로컬 파일 저장
         notifier.save_to_file(status_payload)
         notifier.append_to_history(status_payload)
+        _run_world_tick(status_payload)
 
         # 카카오톡 전송용 메시지 가공
         full_text = report_data["full_report"]

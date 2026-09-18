@@ -16,14 +16,18 @@ def save_to_file(status_data):
         print(f"[에러] 파일 저장 실패: {e}")
 
 
-def append_to_history(status_data):
+def append_to_history(status_data, character="애순이"):
     """
     [신규] "어제 뭐 했어?" 같은 질문에 답하려면 현재 스냅샷만으로는 부족해서, 매 실행마다
     한 줄씩 누적 기록한다(JSONL). 전체 status_data를 다 넣으면 파일이 금방 커지니
     질문에 답하는 데 필요한 핵심 필드만 추린다. 오래된 기록(HISTORY_RETENTION_DAYS 이전)은
     매번 같이 정리해서 파일이 무한정 커지지 않게 한다.
+    [변경] 애순이 전용이었던 로그를 다인물 공용으로 확장 - character 필드로 구분한다.
+    다른 인물들의 기록은 characters.append_character_history()가 같은 파일에 append한다
+    (이쪽은 정리를 안 하니, 정리는 애순이 쪽 이 함수가 실행될 때 같이 되는 셈).
     """
     entry = {
+        "character": character,
         "timestamp": status_data.get("timestamp"),
         "time_tag": status_data.get("time_tag"),
         "title": status_data.get("title"),
