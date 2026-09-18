@@ -26,4 +26,3 @@
     "formatting_template": "[📢 애순이 대리의 실시간 포링푸드 폭로 보고]\n\n🕒 시간: {current_time}\n📌 현장 상황: {title}\n\n💬 애순이의 한마디:\n\"{narrative}\"\n\n🎮 나의 라그M 상태:\n- {ragnarok_status}\n- (한줄 요약: {cynical_thought})"
   }
 }
-

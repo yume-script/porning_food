@@ -1,6 +1,7 @@
 import json
 import requests
 from datetime import datetime
+
 from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL
 import processor
 
@@ -10,15 +11,14 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     processor에서 생성된 '이전 사건 후일담', '오늘의 기분', '생산 통계'를 바탕으로
     애순이의 인간적인 희노애락이 담긴 1인칭 보고서를 생성합니다.
     """
-    count, progress = stats # 생산량 통계 언패킹
+    count, progress = stats  # 생산량 통계 언패킹
     main_product = org_data.get("main_product", "포링 젤리")
-    
     now = datetime.now()
     current_time_str = f"{now.strftime('%Y-%m-%d')} {now.hour:02d}:00 {time_tag}"
-    
+
     # 상세 상태 가져오기
     location, activity, focus, state, _ = processor.get_aesun_detailed_schedule()
-    
+
     # LLM 시스템 프롬프트: mood 인자를 직접 사용하여 프롬프트 주입
     system_prompt = (
         "너는 가상의 회사 '포링푸드' 생산부 대리이자, 일상 속에서 희노애락을 느끼는 인간적인 '애순이'다.\n"
@@ -60,13 +60,12 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
                 "temperature": 0.8,
                 "response_format": {"type": "json_object"}
             }
-            
             res = requests.post(API_URL, json=payload, headers=headers, timeout=15)
             if res.status_code == 200:
                 result = res.json()
                 content_str = result["choices"][0]["message"]["content"]
                 parsed_data = json.loads(content_str)
-                
+
                 # 페르소나 템플릿에 데이터 주입
                 formatted_report = persona_data["speech_style"]["formatting_template"].format(
                     current_time=current_time_str,
@@ -75,10 +74,8 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
                     ragnarok_status=parsed_data.get("game_status", ""),
                     cynical_thought=parsed_data.get("cynical_thought", "")
                 )
-                
                 parsed_data["full_report"] = formatted_report
                 return parsed_data
-                
         except Exception as e:
             print(f"[경고] LLM 보고서 생성 중 오류 발생: {e}")
 
@@ -89,7 +86,7 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     )
     fallback_game_status = "버스 탑승 대기 중, 채팅창 밑밥 깔기 시전"
     fallback_cynical = "희노애락 다 겪어도 결국 생산량 채우고 퇴근 후엔 라그나로크뿐이다."
-    
+
     formatted_report = persona_data["speech_style"]["formatting_template"].format(
         current_time=current_time_str,
         title=issue.get('title', '오늘의 사건'),
@@ -97,7 +94,7 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
         ragnarok_status=fallback_game_status,
         cynical_thought=fallback_cynical
     )
-    
+
     return {
         "narrative": fallback_narrative,
         "game_status": fallback_game_status,

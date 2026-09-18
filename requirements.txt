@@ -1,0 +1,4 @@
+# 원본 저장소엔 requirements.txt가 없었음 - 참고용으로 새로 추가.
+requests
+python-dotenv
+mcp

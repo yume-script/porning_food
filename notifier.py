@@ -2,7 +2,9 @@ import os
 import json
 import requests
 from datetime import datetime
+
 from config import DISCORD_WEBHOOK_URL, LOCAL_BOT_URL, ROOM_ID, STATUS_OUT_PATH
+
 
 def save_to_file(status_data):
     try:
@@ -13,6 +15,7 @@ def save_to_file(status_data):
     except Exception as e:
         print(f"[에러] 파일 저장 실패: {e}")
 
+
 def send_to_discord(text):
     if not DISCORD_WEBHOOK_URL or "YOUR_ACTUAL_TOKEN" in DISCORD_WEBHOOK_URL:
         return
@@ -21,6 +24,7 @@ def send_to_discord(text):
         print("[성공] Discord 전송 완료")
     except Exception as e:
         print(f"[에러] Discord 전송 실패: {e}")
+
 
 def send_to_local_bot(text):
     if not LOCAL_BOT_URL:
@@ -31,4 +35,3 @@ def send_to_local_bot(text):
         print(f"[성공] 로컬 봇 전송 완료 (Room: {ROOM_ID})")
     except Exception as e:
         print(f"[에러] 로컬 봇 전송 실패: {e}")
-

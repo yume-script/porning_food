@@ -2,7 +2,7 @@ import requests
 
 def check_poring_factory_status():
     """
-    http://192.168.0.50:3000 상태를 확인하여 
+    http://192.168.0.50:3000 상태를 확인하여
     공장 정상 가동 여부를 반환합니다.
     """
     url = "http://192.168.0.50:3000//dashboard"

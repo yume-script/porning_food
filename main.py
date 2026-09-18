@@ -1,11 +1,13 @@
 import os
 import json
 from datetime import datetime
+
 import loader
 import processor
 import generator
 import notifier
 import checker
+
 
 def main():
     """
@@ -14,23 +16,22 @@ def main():
     2. 자는 중이면 상태 업데이트 후 종료
     3. 깨어있으면 날씨/공장상태/이슈 생성/보고서 작성/전송
     """
-    
     # 1. 현재 스케줄 및 상태 확인
     location, activity, focus, state, is_sleeping = processor.get_aesun_detailed_schedule()
     time_tag = processor.get_time_tag()
     now_str = datetime.now().isoformat()
-    
+
     # [통계] 생산량 및 오늘의 기분 가져오기
     prod_count, progress_rate = processor.get_production_stats()
     stats = (prod_count, progress_rate)
-    mood = processor.get_daily_mood() # [추가] 애순이의 감정 상태 반영
+    mood = processor.get_daily_mood()  # [추가] 애순이의 감정 상태 반영
+
     print(f"[통계] 현재 생산량: {prod_count}건 ({progress_rate}%)")
     print(f"[감정] 오늘의 애순이: {mood}")
 
     # 2. 취침 중일 경우 처리
     if is_sleeping:
         print(f"[정보] 현재 애순이는 자는 시간입니다 ({state}). 상태 파일만 업데이트합니다.")
-
         status_payload = {
             "timestamp": now_str,
             "time_tag": time_tag,
@@ -43,13 +44,12 @@ def main():
             "full_report": f"[{time_tag}] 애순이는 현재 자는 중입니다... Zzz",
             "state": state
         }
-
         notifier.save_to_file(status_payload)
         return
 
     # 3. 깨어있는 시간일 경우: 전체 파이프라인 실행
     print(f"[정보] 애순이 활동 시작: {state} 모드")
-    
+
     # 포링푸드 공장 상태 확인
     factory_msg, is_factory_ok = checker.check_poring_factory_status()
     print(f"[체크] 포링푸드 공장 상태: {factory_msg}")
@@ -74,7 +74,6 @@ def main():
     # 4. 결과 저장 및 전송
     if report_data:
         print("[4/4] 결과 데이터 저장 및 전송 중...")
-
         status_payload = {
             "timestamp": now_str,
             "time_tag": time_tag,
@@ -84,7 +83,7 @@ def main():
             "weather": weather_info,
             "factory_status": factory_msg,
             "state": state,
-            "mood": mood, # 상태 로그에 기분 추가
+            "mood": mood,  # 상태 로그에 기분 추가
             **report_data
         }
 
@@ -94,19 +93,19 @@ def main():
         # 카카오톡 전송용 메시지 가공
         full_text = report_data["full_report"]
         target_phrase = "💬 애순이의 한마디"
-        
         if target_phrase in full_text:
             katalk_msg = full_text.replace(target_phrase, f"\n━━━━━━━━━━━━━━\n{'\u200b' * 500}\n{target_phrase}")
         else:
             katalk_msg = full_text
 
         # 외부 채널 전송
-        notifier.send_to_discord(full_text) 
-        notifier.send_to_local_bot(katalk_msg) 
+        notifier.send_to_discord(full_text)
+        notifier.send_to_local_bot(katalk_msg)
 
         print(f"\n=== [전송 완료] ===\n{full_text}\n")
     else:
         print("[오류] 보고서 생성에 실패하여 전송을 취소합니다.")
+
 
 if __name__ == "__main__":
     main()

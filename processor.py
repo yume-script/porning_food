@@ -5,61 +5,32 @@ import json
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
 from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL, SEARCH_MODEL
 
 # .env 로드
 load_dotenv()
 
 ISSUE_LOG_FILE = "last_issue.json"
+# [주의] KATALK_LOG_DIR은 옛날 discord_bot(정지됨)의 카톡 로그 경로다. 경쟁사 실측 벤치마크
+# (_count_today_messages_in_room, rival_companies.json이 있을 때만 동작)에서만 여전히 쓰인다 -
+# rival_companies.json 자체가 저장소에 없어서 지금은 사실상 죽어있는 경로다.
 KATALK_LOG_DIR = "/mnt/discord_bot/katalk_log"
-# 이 길드(디스코드 서버) 전체로 들어오는 입력을 "고객의 요청사항"으로 간주.
-# https://discord.com/channels/{길드ID}/{채널ID} 에서 길드ID 부분.
-TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID", "591180628842774550")
-DAILY_TARGET = int(os.getenv("DAILY_TARGET_PRODUCTION", 1000))
 
-# 원본(오늘자가 계속 쌓이는) 로그 파일명 패턴: log_{room_id}.jsonl
-# katalk_to_rag_bridge.py가 만드는 월별 아카이브(log_{room_id}_{yyyymm}.jsonl)는
-# 과거 데이터라서 "오늘" 통계에 넣으면 안 되므로 이 패턴에서 제외됨.
-_LIVE_LOG_FILENAME_RE = re.compile(r"^log_(\d+)\.jsonl$")
+DAILY_TARGET = int(os.getenv("DAILY_TARGET_PRODUCTION", 1000))
 
 
 def get_production_stats():
     """
-    특정 길드(TARGET_GUILD_ID) 전체 채널로 들어온 오늘자 메시지를 전부
-    "고객의 요청사항"으로 간주해 개수를 세고, 목표 대비 진행률을 계산한다.
-    (기존에는 카톡방 하나(log_18221226698539974.jsonl)만 셌었음)
+    [변경] 원래는 discord_bot의 카톡 로그(오늘자 메시지 수)를 "고객의 요청사항"으로 간주해
+    세었는데, discord_bot_v2로 넘어오면서 로그 형식/경로가 바뀌어 더 이상 셀 수 없게 됐다.
+    사용자 요청으로 실제 집계 대신 랜덤 값으로 대체한다 - 날짜+시간을 시드로 써서, 같은
+    시간대(예: 오전 10시대) 안에서 여러 번 돌아도 들쭉날쭉하지 않고, 시간이 지나면 자연스럽게
+    값이 바뀐다.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    count = 0
-
-    try:
-        if os.path.isdir(KATALK_LOG_DIR):
-            for fname in os.listdir(KATALK_LOG_DIR):
-                if not _LIVE_LOG_FILENAME_RE.match(fname):
-                    continue  # 월별 아카이브 등은 제외, 원본 로그만 스캔
-
-                fpath = os.path.join(KATALK_LOG_DIR, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        for line in f:
-                            if not line.strip():
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-
-                            if entry.get("guild_id") != TARGET_GUILD_ID:
-                                continue
-
-                            timestamp_str = entry.get("timestamp", "")
-                            if timestamp_str.startswith(today_str):
-                                count += 1
-                except Exception as e:
-                    print(f"[경고] {fname} 분석 중 오류: {e}")
-    except Exception as e:
-        print(f"[경고] 로그 디렉토리 스캔 중 오류: {e}")
-
+    seed_key = datetime.now().strftime("%Y-%m-%d-%H")
+    rnd = random.Random(seed_key)
+    count = rnd.randint(int(DAILY_TARGET * 0.3), int(DAILY_TARGET * 1.1))
     progress = (count / DAILY_TARGET) * 100 if DAILY_TARGET > 0 else 0
     return count, round(progress, 1)
 
@@ -156,6 +127,7 @@ def _format_rival_block(rival_report: list) -> str:
         else:
             cmp_word = "우리와 정확히 동률이고"
         lines.append(f"- {r['name']}({r['product']}): 오늘 지표 {r['performance']}건, {cmp_word} 있음")
+
     joined = "\n".join(lines)
     return (
         f"\n[업계 동향 - 경쟁사 오늘의 성과]\n{joined}\n"
@@ -163,13 +135,13 @@ def _format_rival_block(rival_report: list) -> str:
         "(단, 애순이 특유의 낙천적인 태도는 잃지 않게 - 매번 심각하게 다룰 필요는 없다).\n"
     )
 
+
 def fetch_gwangju_weather():
     """Gemini-search 모델을 이용해 현재 광주광역시의 실시간 날씨를 조회합니다."""
     if not API_URL or not LITELLM_MASTER_KEY:
         return "날씨 정보를 가져올 수 없음 (API 설정 미비)"
 
     prompt = "오늘 현재 대한민국 광주광역시의 날씨(기온, 하늘 상태, 특이사항)를 아주 짧게 한 문장으로 알려줘."
-    
     try:
         headers = {"Authorization": f"Bearer {LITELLM_MASTER_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -183,8 +155,8 @@ def fetch_gwangju_weather():
             return weather_text.strip()
     except Exception as e:
         print(f"[경고] 날씨 조회 실패: {e}")
-    
     return "날씨 정보 조회 실패 (평범한 흐린 날씨)"
+
 
 def get_aesun_detailed_schedule():
     """애순이의 시간별 상세 스케줄 및 상태를 반환합니다."""
@@ -223,6 +195,7 @@ def get_aesun_detailed_schedule():
         else:
             return "집(침대/컴퓨터 앞)", "본격적인 버스 탑승 및 채팅", "고수님들 뒤졸졸 따라다니며 숙제 완료", "게임 중", False
 
+
 def get_daily_mood():
     moods = [
         "오늘따라 모닝 커피가 정말 맛있어서 기분이 좋다.",
@@ -233,6 +206,7 @@ def get_daily_mood():
     ]
     return random.choice(moods)
 
+
 def get_last_issue():
     if os.path.exists(ISSUE_LOG_FILE):
         try:
@@ -242,13 +216,16 @@ def get_last_issue():
             if datetime.now() - last_time > timedelta(hours=24):
                 return {"title": "평화로운 일상", "description": "지난 사건은 모두 해결되어 특별한 문제 없는 평온한 상태다."}
             return data
-        except: return None
+        except:
+            return None
     return None
+
 
 def save_current_issue(issue):
     issue["timestamp"] = datetime.now().isoformat()
     with open(ISSUE_LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(issue, f, ensure_ascii=False)
+
 
 # 외부 화제(사회/영화/스포츠/날씨)를 반영할 확률 (0~1). .env의 EXTERNAL_TOPIC_PROBABILITY로 조정 가능.
 # 예전엔 "사회 이슈" 하나만 35% 확률로 살짝 곁들이는 정도였는데,
@@ -275,7 +252,6 @@ def fetch_daily_topic():
 
     category = random.choice(list(_TOPIC_CATEGORIES.keys()))
     guide = _TOPIC_CATEGORIES[category]
-
     prompt = (
         f"오늘 한국에서 화제가 될 만한 '{category}' 분야의 가볍고 무난한 소식을 하나만 골라줘. "
         f"({guide})\n"
@@ -301,7 +277,6 @@ def fetch_daily_topic():
                 return data
     except Exception as e:
         print(f"[경고] 오늘의 화제 조회 실패: {e}")
-
     return None
 
 
@@ -309,13 +284,12 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
     location, activity, focus, state, _ = get_aesun_detailed_schedule()
     last_issue = get_last_issue()
     prev_context = f"이전 사건: '{last_issue['title']}' / 상황: {last_issue['description']}" if last_issue else "최근 특별한 사건 없음."
+
     main_product = org_data.get("main_product", "포링 젤리")
-    
     all_members = []
     for dept in org_data["departments"]:
         for member in dept["members"]:
             all_members.append(f"{member.get('prefix', '')} {member['name']} {member['rank']}")
-    
     selected = random.sample(all_members, 3)
 
     # 외부 화제(사회/영화/스포츠/날씨)를 이번 회차에 반영할지 결정
@@ -383,16 +357,22 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
             return new_issue
     except Exception as e:
         print(f"[에러] 이슈 생성 실패: {e}")
-    
+
     return {"title": "평범한 하루", "description": "특별한 일 없이 피곤한 하루가 지나가고 있다."}
+
 
 def get_time_tag():
     now = datetime.now()
     weekday = now.weekday()
     hour = now.hour
-    if weekday == 6: return "[일요일/꿀잠/휴식]"
-    elif weekday == 5: return "[토요일/지옥특근]"
-    if 2 <= hour < 6: return "[심야/취침중]"
-    elif 6 <= hour < 9: return "[오전/출근길]"
-    elif 19 <= hour < 21: return "[저녁/퇴근길]"
+    if weekday == 6:
+        return "[일요일/꿀잠/휴식]"
+    elif weekday == 5:
+        return "[토요일/지옥특근]"
+    if 2 <= hour < 6:
+        return "[심야/취침중]"
+    elif 6 <= hour < 9:
+        return "[오전/출근길]"
+    elif 19 <= hour < 21:
+        return "[저녁/퇴근길]"
     return "[평일/업무/게임]"

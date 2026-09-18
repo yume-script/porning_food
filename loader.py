@@ -1,6 +1,8 @@
 import json
 import sys
+
 from config import ORG_PATH, ISSUE_PATH, PERSONA_PATH
+
 
 def load_resources():
     try:
@@ -10,7 +12,7 @@ def load_resources():
             issues = json.load(f)
         with open(PERSONA_PATH, "r", encoding="utf-8") as f:
             persona = json.load(f)
-        
+
         # 경쟁사 정보가 org.json에 없을 경우 기본값 할당 (안전성 확보)
         if "market_info" not in org:
             org["market_info"] = {
@@ -18,11 +20,12 @@ def load_resources():
                 "rival_product": "포포링육포",
                 "relation": "레시피를 표절한 괘씸한 경쟁사"
             }
-            
+
         return org, issues, persona
     except Exception as e:
         print(f"[치명적 오류] 리소스 로드 실패: {e}")
         sys.exit(1)
+
 
 def fallback_perspective_converter(text):
     """
