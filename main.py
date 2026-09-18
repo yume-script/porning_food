@@ -45,6 +45,7 @@ def main():
             "state": state
         }
         notifier.save_to_file(status_payload)
+        notifier.append_to_history(status_payload)
         return
 
     # 3. 깨어있는 시간일 경우: 전체 파이프라인 실행
@@ -89,6 +90,7 @@ def main():
 
         # 로컬 파일 저장
         notifier.save_to_file(status_payload)
+        notifier.append_to_history(status_payload)
 
         # 카카오톡 전송용 메시지 가공
         full_text = report_data["full_report"]

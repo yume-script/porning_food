@@ -13,6 +13,11 @@ PERSONA_PATH = os.path.join(BASE_DIR, "aesun_persona.json")
 # 통해서만 조회한다 - 직접 파일 경로를 공유하지 않는다.
 STATUS_OUT_PATH = os.path.join(BASE_DIR, "aesun_current_status.json")
 
+# [신규] 현재 상태 스냅샷만으로는 "어제 뭐 했어?" 같은 질문에 답할 수 없어서,
+# 매 실행마다 누적 기록을 남기는 히스토리 로그. mcp_server.py의 get_recent_history()가 읽는다.
+HISTORY_LOG_PATH = os.path.join(BASE_DIR, "aesun_history.jsonl")
+HISTORY_RETENTION_DAYS = int(os.getenv("HISTORY_RETENTION_DAYS", "30"))
+
 
 def load_env(filepath):
     env_vars = {}

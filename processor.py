@@ -12,25 +12,52 @@ from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL, SEARCH_MODEL
 load_dotenv()
 
 ISSUE_LOG_FILE = "last_issue.json"
-# [주의] KATALK_LOG_DIR은 옛날 discord_bot(정지됨)의 카톡 로그 경로다. 경쟁사 실측 벤치마크
-# (_count_today_messages_in_room, rival_companies.json이 있을 때만 동작)에서만 여전히 쓰인다 -
-# rival_companies.json 자체가 저장소에 없어서 지금은 사실상 죽어있는 경로다.
 KATALK_LOG_DIR = "/mnt/discord_bot/katalk_log"
 
+# 이 길드(디스코드 서버) 전체로 들어오는 입력을 "고객의 요청사항"으로 간주.
+# https://discord.com/channels/{길드ID}/{채널ID} 에서 길드ID 부분.
+TARGET_GUILD_ID = os.getenv("TARGET_GUILD_ID", "591180628842774550")
 DAILY_TARGET = int(os.getenv("DAILY_TARGET_PRODUCTION", 1000))
+
+# 원본(오늘자가 계속 쌓이는) 로그 파일명 패턴: log_{room_id}.jsonl
+# katalk_to_rag_bridge.py가 만드는 월별 아카이브(log_{room_id}_{yyyymm}.jsonl)는
+# 과거 데이터라서 "오늘" 통계에 넣으면 안 되므로 이 패턴에서 제외됨.
+_LIVE_LOG_FILENAME_RE = re.compile(r"^log_(\d+)\.jsonl$")
 
 
 def get_production_stats():
     """
-    [변경] 원래는 discord_bot의 카톡 로그(오늘자 메시지 수)를 "고객의 요청사항"으로 간주해
-    세었는데, discord_bot_v2로 넘어오면서 로그 형식/경로가 바뀌어 더 이상 셀 수 없게 됐다.
-    사용자 요청으로 실제 집계 대신 랜덤 값으로 대체한다 - 날짜+시간을 시드로 써서, 같은
-    시간대(예: 오전 10시대) 안에서 여러 번 돌아도 들쭉날쭉하지 않고, 시간이 지나면 자연스럽게
-    값이 바뀐다.
+    특정 길드(TARGET_GUILD_ID) 전체 채널로 들어온 오늘자 메시지를 전부
+    "고객의 요청사항"으로 간주해 개수를 세고, 목표 대비 진행률을 계산한다.
+    (기존에는 카톡방 하나(log_18221226698539974.jsonl)만 셌었음)
     """
-    seed_key = datetime.now().strftime("%Y-%m-%d-%H")
-    rnd = random.Random(seed_key)
-    count = rnd.randint(int(DAILY_TARGET * 0.3), int(DAILY_TARGET * 1.1))
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    count = 0
+    try:
+        if os.path.isdir(KATALK_LOG_DIR):
+            for fname in os.listdir(KATALK_LOG_DIR):
+                if not _LIVE_LOG_FILENAME_RE.match(fname):
+                    continue  # 월별 아카이브 등은 제외, 원본 로그만 스캔
+                fpath = os.path.join(KATALK_LOG_DIR, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if entry.get("guild_id") != TARGET_GUILD_ID:
+                                continue
+                            timestamp_str = entry.get("timestamp", "")
+                            if timestamp_str.startswith(today_str):
+                                count += 1
+                except Exception as e:
+                    print(f"[경고] {fname} 분석 중 오류: {e}")
+    except Exception as e:
+        print(f"[경고] 로그 디렉토리 스캔 중 오류: {e}")
+
     progress = (count / DAILY_TARGET) * 100 if DAILY_TARGET > 0 else 0
     return count, round(progress, 1)
 
@@ -158,13 +185,35 @@ def fetch_gwangju_weather():
     return "날씨 정보 조회 실패 (평범한 흐린 날씨)"
 
 
+def _weighted_choice(rnd, candidates):
+    """candidates: [(location, activity, focus, state, weight), ...] 중 가중치 랜덤으로 하나 고른다."""
+    total = sum(c[4] for c in candidates)
+    r = rnd.uniform(0, total)
+    upto = 0
+    for loc, act, focus, state, w in candidates:
+        upto += w
+        if upto >= r:
+            return loc, act, focus, state
+    loc, act, focus, state, _ = candidates[-1]
+    return loc, act, focus, state
+
+
 def get_aesun_detailed_schedule():
-    """애순이의 시간별 상세 스케줄 및 상태를 반환합니다."""
+    """
+    애순이의 시간별 상세 스케줄 및 상태를 반환합니다.
+    [변경] 원래는 시간대마다 활동이 "일하는 중" 아니면 "게임 중" 둘 중 하나로 고정돼 있어서
+    이야기가 회사/게임 얘기로만 편중됐다. 점심/저녁/주말처럼 개인 시간이 날 법한 시간대는
+    영화·데이트·독서·쇼핑·운동·친구모임 같은 개인 일상 후보를 추가하고 가중치 랜덤으로
+    고른다 - 날짜+시간을 시드로 써서 같은 시간대 안에서는 값이 고정되고(여러 번 돌아도 안
+    바뀜), 시간이 지나면 자연스럽게 바뀐다. 출퇴근/취침/업무 시간대는 그대로 고정 - 실제로
+    그 시간엔 다른 걸 하기 어려우니까.
+    """
     now = datetime.now()
     hour = now.hour
     weekday = now.weekday()
     is_weekend = (weekday == 6)
     is_sleeping = False
+    rnd = random.Random(now.strftime("%Y-%m-%d-%H"))  # 시간대별로 고정, 시간이 바뀌면 갱신
 
     if 2 <= hour < 6:
         is_sleeping = True
@@ -175,9 +224,23 @@ def get_aesun_detailed_schedule():
             is_sleeping = True
             return "집(침대)", "꿀같은 일요일 늦잠", "평일의 피로를 잠으로 보충 중", "자는 중", is_sleeping
         elif 11 <= hour < 19:
-            return "집(거실)", "배달 음식 먹으며 라그M 접속", "누가 숙제 버스 좀 태워줬으면 좋겠음", "게임 중", False
+            loc, act, focus, state = _weighted_choice(rnd, [
+                ("집(거실)", "배달 음식 먹으며 라그M 접속", "누가 숙제 버스 좀 태워줬으면 좋겠음", "게임 중", 3),
+                ("영화관", "친구랑 신작 영화 관람", "팝콘 향에 취해 회사 생각은 완전히 잊음", "나들이 중", 2),
+                ("동네 카페", "소개팅 겸 데이트", "상대방 눈치 보랴 대화 이어가랴 정신없음", "데이트 중", 1),
+                ("서점", "다음 주 읽을 책 고르는 중", "에세이 코너에서 한참을 서성임", "나들이 중", 2),
+                ("헬스장/공원", "밀린 운동 벼락치기", "숨은 차지만 그래도 상쾌함", "운동 중", 1),
+                ("친구 집", "친구들과 브런치 모임", "오랜만에 회사 얘기 말고 딴 얘기만 함", "모임 중", 2),
+                ("쇼핑몰", "계절 옷 쇼핑", "월급 스쳐 지나가는 소리가 들림", "나들이 중", 1),
+            ])
+            return loc, act, focus, state, False
         else:
-            return "집(침대 위)", "내일 출근 공포를 게임으로 잊기", "월요병 도지기 직전의 필사적인 레이드 시청", "게임/휴식 중", False
+            loc, act, focus, state = _weighted_choice(rnd, [
+                ("집(침대 위)", "내일 출근 공포를 게임으로 잊기", "월요병 도지기 직전의 필사적인 레이드 시청", "게임 중", 3),
+                ("집(소파)", "밀린 드라마/영화 정주행", "다음 화 눌러버리다 자정 넘김", "휴식 중", 2),
+                ("집(책상)", "야식 먹으며 독서", "몇 장 못 읽고 또 딴생각", "휴식 중", 1),
+            ])
+            return loc, act, focus, state, False
     else:
         is_saturday = (weekday == 5)
         fatigue_label = " (토요일 특근으로 분노 상승)" if is_saturday else ""
@@ -187,13 +250,27 @@ def get_aesun_detailed_schedule():
         elif 8 <= hour < 12:
             return "회사(사무실/현장)", "오전 업무 수행 중", "상사 눈 피해 스마트폰 뒤집어놓고 몰래 자사 확인", "일하는 중", False
         elif 12 <= hour < 13:
-            return "회사 식당", "점심 빨리 먹고 구석에서 레이드", "밥 먹으면서도 채팅창에서 숙제 파티 탐색", "게임 중", False
+            loc, act, focus, state = _weighted_choice(rnd, [
+                ("회사 식당", "점심 빨리 먹고 구석에서 레이드", "밥 먹으면서도 채팅창에서 숙제 파티 탐색", "게임 중", 3),
+                ("회사 앞 카페", "동료와 점심 커피 수다", "회사 뒷담화 반, 게임 얘기 반", "휴식 중", 2),
+                ("회사 근처 서점", "점심시간 책방 산책", "딱 10분만 보고 오려다 늦을 뻔함", "나들이 중", 1),
+                ("회사 옥상", "잠깐 혼자만의 낮잠", "5분만 자려다 15분 자버림", "휴식 중", 1),
+            ])
+            return loc, act, focus, state, False
         elif 13 <= hour < 19:
             return "회사(생산 현장)", f"오후 업무 진행 중{fatigue_label}", "체력 방전, 그냥 퇴근하고 싶음", "일하는 중", False
         elif 19 <= hour < 21:
             return "퇴근길 버스 안", "기력을 짜낸 길드 채팅", "집 도착 시각 계산하며 버스 예약", "이동 중", False
         else:
-            return "집(침대/컴퓨터 앞)", "본격적인 버스 탑승 및 채팅", "고수님들 뒤졸졸 따라다니며 숙제 완료", "게임 중", False
+            loc, act, focus, state = _weighted_choice(rnd, [
+                ("집(침대/컴퓨터 앞)", "본격적인 버스 탑승 및 채팅", "고수님들 뒤졸졸 따라다니며 숙제 완료", "게임 중", 4),
+                ("집/영화관", "퇴근 후 영화 한 편", "오늘만큼은 아무 생각 없이 몰입", "휴식 중", 2),
+                ("동네 카페/레스토랑", "저녁 데이트", "회사 얘기는 절대 안 하기로 다짐함", "데이트 중", 2),
+                ("헬스장/요가원", "저녁 운동 클래스", "운동보다 씻고 나오는 뿌듯함이 더 큼", "운동 중", 1),
+                ("집(책상)", "밤에 잠깐 독서", "두 페이지 읽고 스르륵 잠들 뻔함", "휴식 중", 1),
+                ("친구와 전화", "밀린 수다 타임", "회사 스트레스를 친구한테 다 쏟아냄", "휴식 중", 1),
+            ])
+            return loc, act, focus, state, False
 
 
 def get_daily_mood():
