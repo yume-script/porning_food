@@ -12,6 +12,10 @@ config.py의 STATUS_OUT_PATH/HISTORY_LOG_PATH/CHARACTERS_STATE_PATH 전부 포�
 [확장] 원래 애순이 전용이었는데, 심시티처럼 다른 인물들도 각자 상태/기록을 갖게 되면서
 character 파라미터로 아무나 조회할 수 있게 넓혔다(기본값은 "애순이"라 기존 사용법은
 그대로 작동한다). get_character_list()로 누가 있는지부터 물어볼 수도 있다.
+
+[신규] 매시 방송(스포트라이트)은 애순이와 다른 26명 중 가중치 랜덤으로 한 명에게만
+돌아간다(main.py의 로테이션) - 방송 안 된 인물의 근황이 궁금하면 get_character_story()가
+그 자리에서 즉석으로 짧은 이야기를 만들어준다(같은 시간대 안에서는 캐시 재사용).
 """
 from __future__ import annotations
 
@@ -23,8 +27,16 @@ from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
 
 from config import STATUS_OUT_PATH, HISTORY_LOG_PATH, CHARACTERS_STATE_PATH, ORGANIZATION_GLOB
+import characters
+import processor
+import generator
 
 mcp = FastMCP("poring-food")
+
+# [신규] 온디맨드 이야기 캐시 - 같은 시간대(시 단위) 안에서 같은 인물을 여러 번 물어봐도
+# LLM을 다시 호출하지 않는다. 이 서버는 discord_bot_v2가 부팅할 때 한 번 실행되어 계속
+# 떠있는 프로세스라(매 호출마다 새로 뜨는 게 아님), 이 캐시가 프로세스 수명 동안 유지된다.
+_story_cache: dict[tuple[str, str], str] = {}
 
 
 def _load_characters_state() -> dict:
@@ -188,6 +200,62 @@ def get_recent_history(character: str = "애순이", days: int = 1) -> str:
             lines.append(f"[{date_key}] " + " / ".join(day_lines))
 
     return "\n".join(lines) if lines else f"최근 {days}일 동안의 기록이 없어요."
+
+
+@mcp.tool()
+def get_character_story(character: str) -> str:
+    """
+    [신규] 스포트라이트(매시 1명 방송) 순서가 안 돌아온 인물이 지금 뭘 하고 있는지, 그 사람
+    시점의 짧은 이야기를 그 자리에서 즉석으로 만들어 알려준다. "오크히어로 오늘 뭐해?"처럼
+    누군가의 근황이 궁금할 때 쓴다. 애순이는 get_current_status("애순이")가 이미 상세하게
+    답하니 이 도구는 애순이 외의 인물에 쓴다. 같은 시간대 안에서는 캐시된 결과를 재사용해서
+    똑같은 사람을 여러 번 물어봐도 LLM을 다시 호출하지 않는다.
+    """
+    if character == "애순이":
+        return get_current_status("애순이")
+
+    cache_key = (character, datetime.now().strftime("%Y-%m-%d-%H"))
+    if cache_key in _story_cache:
+        return _story_cache[cache_key]
+
+    matches = _find_state_by_name(character)
+    if not matches:
+        result = f"'{character}'라는 인물을 못 찾았어요. get_character_list로 누가 있는지 확인해보세요."
+        _story_cache[cache_key] = result
+        return result
+    if len(matches) > 1:
+        return f"'{character}'라는 이름이 여러 회사에 있어요 - 어느 회사인지 알려주시면 좁혀드릴게요."
+
+    _, info = matches[0]
+    if info.get("state") == "자는 중":
+        result = f"{character}는 지금 자고 있어서 이야기를 만들 수가 없어요. 나중에 다시 물어봐주세요."
+        _story_cache[cache_key] = result
+        return result
+
+    persona = None
+    for c in characters.load_roster():
+        if c["name"] == character and c["company"] == info.get("company"):
+            persona = c
+            break
+    if not persona:
+        result = f"'{character}'의 페르소나 정보를 조직도에서 못 찾았어요."
+        _story_cache[cache_key] = result
+        return result
+
+    issue = processor.get_last_issue() or {"title": "평범한 하루", "description": "특별한 일 없는 하루"}
+    mood = processor.get_daily_mood()
+
+    try:
+        report = generator.generate_generic_character_report(
+            persona, issue, processor.get_time_tag(), "정보 없음", mood,
+            info.get("location", ""), info.get("activity", ""), info.get("state", ""),
+        )
+        result = report.get("narrative", "") or "이야기를 만들었는데 내용이 비어있어요."
+    except Exception as e:
+        result = f"{character}의 이야기를 만드는 중 오류가 발생했어요: {e}"
+
+    _story_cache[cache_key] = result
+    return result
 
 
 if __name__ == "__main__":

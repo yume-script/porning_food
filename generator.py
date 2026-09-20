@@ -149,3 +149,101 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
         "cynical_thought": fallback_cynical,
         "full_report": formatted_report
     }
+
+
+# ============================================================= 스포트라이트 로테이션 + 온디맨드용
+# [신규] 애순이 말고 다른 인물(포링푸드/에린 로지스틱스 27명 전원)에게도 쓸 수 있는 범용
+# 리포트 생성기. aesun_persona.json 같은 전용 페르소나 파일이 없는 사람들이라, 조직도의
+# outer_persona/inner_truth를 그대로 프롬프트에 넣어 "겉모습과 속마음의 괴리"를 살린다.
+_GENERIC_STATUS_HEADERS = {
+    "일하는 중": ("🏢 오늘의 업무 소감", "오늘 업무/직장에서 있었던 일에 대한 소감"),
+    "개인시간": ("💭 오늘의 소회", "오늘 개인 시간을 보내며 든 생각"),
+}
+_GENERIC_DEFAULT_HEADER = ("💭 오늘의 소회", "오늘 하루를 보내며 든 생각")
+
+GENERIC_TEMPLATE = (
+    "[📢 {name}의 실시간 현장 보고]\n\n"
+    "🕒 시간: {current_time}\n"
+    "📌 현장 상황: {title}\n\n"
+    "💬 {name}의 한마디:\n\"{narrative}\"\n\n"
+    "{status_header}:\n- {closing}\n- (한줄 요약: {cynical_thought})"
+)
+
+
+def generate_generic_character_report(character, issue, time_tag, weather_info, mood, location, activity, state):
+    """
+    character: characters.load_roster()의 항목 하나 (name/company/dept/rank/outer_persona/
+    inner_truth 포함). issue: 그날의 회사 공통 이슈(processor.get_last_issue() 등에서 가져온
+    것 - 애순이 파이프라인과 같은 이슈를 공유해서 세계관 연속성을 유지한다).
+    """
+    name = character["name"]
+    now = datetime.now()
+    current_time_str = f"{now.strftime('%Y-%m-%d')} {now.hour:02d}:00 {time_tag}"
+    status_header, topic_hint = _GENERIC_STATUS_HEADERS.get(state, _GENERIC_DEFAULT_HEADER)
+    title = issue.get("title", "오늘의 사건")
+
+    system_prompt = (
+        f"너는 '{character.get('company', '')}' {character.get('dept', '')} {character.get('rank', '')} "
+        f"'{name}'이다.\n"
+        f"겉으로 보이는 모습: {character.get('outer_persona', '')}\n"
+        f"속마음(진짜 성격): {character.get('inner_truth', '')}\n"
+        "이 겉모습과 속마음의 괴리를 살려서, 시니컬하지만 유머러스한 1인칭 일기를 써라.\n\n"
+        f"--- [현재 상태] ---\n"
+        f"- 오늘의 기분: {mood}\n"
+        f"- 위치: {location}\n"
+        f"- 현재 활동: {activity}\n"
+        f"- 현재 날씨: {weather_info}\n\n"
+        "작성 지침:\n"
+        f"- 회사에 떠도는 [오늘의 사건]을 알고 있다는 티를 살짝만 내되, '{name}'만의 시점과 속마음으로 "
+        "재해석해서 써라 - 다른 사람(애순이 등)과 똑같은 반응/말투를 절대 흉내내지 마라.\n"
+        f"- 마지막 'closing' 필드는 \"{topic_hint}\"에 대한 내용으로 채워라.\n"
+        "- 매번 똑같은 표현/문장 구조를 반복하지 말고 새로운 소재와 어휘로 써라.\n"
+        "- 반드시 아래 키를 가진 JSON 객체로 응답: {\"narrative\": \"...\", \"closing\": \"...\", \"cynical_thought\": \"...\"}"
+    )
+    user_prompt = f"[오늘의 사건]\n제목: {title}\n내용: {issue.get('description', '')}"
+
+    if API_URL and LITELLM_MASTER_KEY:
+        try:
+            headers = {
+                "Authorization": f"Bearer {LITELLM_MASTER_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.85,
+                "response_format": {"type": "json_object"}
+            }
+            res = requests.post(API_URL, json=payload, headers=headers, timeout=15)
+            if res.status_code == 200:
+                parsed = json.loads(res.json()["choices"][0]["message"]["content"])
+                formatted = GENERIC_TEMPLATE.format(
+                    name=name, current_time=current_time_str, title=title,
+                    narrative=parsed.get("narrative", ""), status_header=status_header,
+                    closing=parsed.get("closing", ""), cynical_thought=parsed.get("cynical_thought", "")
+                )
+                parsed["full_report"] = formatted
+                parsed["name"] = name
+                return parsed
+        except Exception as e:
+            print(f"[경고] {name} 보고서 생성 중 오류 발생: {e}")
+
+    # fallback
+    fallback_narrative = f"{name}는 오늘 {location}에서 {activity} 중이다. 기분은 '{mood}'."
+    fallback_closing = f"{activity}에 대한 짧은 소감, 그럭저럭 나쁘지 않다."
+    fallback_cynical = "오늘도 그럭저럭 하루가 흘러간다."
+    formatted = GENERIC_TEMPLATE.format(
+        name=name, current_time=current_time_str, title=title,
+        narrative=fallback_narrative, status_header=status_header,
+        closing=fallback_closing, cynical_thought=fallback_cynical
+    )
+    return {
+        "narrative": fallback_narrative,
+        "closing": fallback_closing,
+        "cynical_thought": fallback_cynical,
+        "full_report": formatted,
+        "name": name,
+    }
