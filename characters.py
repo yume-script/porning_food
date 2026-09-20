@@ -116,7 +116,10 @@ def get_generic_schedule(character: dict, rnd: random.Random) -> tuple[str, str,
     if 0 <= hour < 7:
         return "집", "잠자는 중", "자는 중"
 
-    if not is_weekend and 9 <= hour < 18:
+    # [수정] 원래 업무 시간이 9~18시였는데, 취침(0~7시)과의 사이에 7~8시가 아무 조건에도
+    # 안 걸려서 "출근 시간대인데 개인활동(소개팅 등) 중"으로 나오는 오류가 있었다.
+    # 취침 끝나는 시각과 바로 이어지게 7시부터 업무로 잡아서 그 공백을 없앴다.
+    if not is_weekend and 7 <= hour < 18:
         behaviors = [b.strip() for b in character.get("key_behavior", "").split(",") if b.strip()]
         act = rnd.choice(behaviors) if behaviors else "업무 처리 중"
         workplace = f"{character.get('company', '회사')} 사무실"
