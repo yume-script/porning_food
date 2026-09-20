@@ -12,6 +12,7 @@ config.py의 STATUS_OUT_PATH/HISTORY_LOG_PATH/CHARACTERS_STATE_PATH 전부 포�
 [확장] 원래 애순이 전용이었는데, 심시티처럼 다른 인물들도 각자 상태/기록을 갖게 되면서
 character 파라미터로 아무나 조회할 수 있게 넓혔다(기본값은 "애순이"라 기존 사용법은
 그대로 작동한다). get_character_list()로 누가 있는지부터 물어볼 수도 있다.
+get_all_characters_status()로 전원의 현재 위치/활동을 한 번에 볼 수도 있다.
 
 [신규] 매시 방송(스포트라이트)은 애순이와 다른 26명 중 가중치 랜덤으로 한 명에게만
 돌아간다(main.py의 로테이션) - 방송 안 된 인물의 근황이 궁금하면 get_character_story()가
@@ -198,6 +199,38 @@ def get_recent_history(character: str = "애순이", days: int = 1) -> str:
             lines.append(f"[{date_key}] " + " / ".join(day_lines))
 
     return "\n".join(lines) if lines else f"최근 {days}일 동안의 기록이 없어요."
+
+
+@mcp.tool()
+def get_all_characters_status() -> str:
+    """
+    포링푸드와 라이벌 회사 전원(애순이 포함)이 지금 각자 어디서 뭘 하고 있는지 한 번에
+    보여준다. "포링푸드 사람들 지금 뭐하고 있지?", "다들 뭐해?" 같은 전체 근황 질문에 쓴다.
+    회사별로 묶어서 보여준다.
+    """
+    states = _load_characters_state()
+    if not states:
+        return "아직 상태 정보가 없어요 (첫 실행 전이거나 파일이 없음)."
+
+    by_company: dict[str, list[str]] = {}
+    for info in states.values():
+        name = info.get("name", "?")
+        location = info.get("location", "")
+        activity = info.get("activity", "")
+        company = info.get("company", "기타")
+        if location and activity:
+            line = f"{name}: {location}에서 {activity}"
+        elif activity:
+            line = f"{name}: {activity}"
+        else:
+            line = f"{name}: 상태 정보 없음"
+        by_company.setdefault(company, []).append(line)
+
+    blocks = []
+    for company in sorted(by_company.keys()):
+        lines = "\n".join(f"- {l}" for l in by_company[company])
+        blocks.append(f"【{company}】\n{lines}")
+    return "\n\n".join(blocks)
 
 
 @mcp.tool()
