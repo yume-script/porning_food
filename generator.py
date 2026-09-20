@@ -1,4 +1,6 @@
 import json
+import os
+import random
 import requests
 from datetime import datetime
 
@@ -19,6 +21,12 @@ _STATUS_HEADERS = {
 }
 _DEFAULT_STATUS_HEADER = ("💭 오늘의 소회", "오늘 하루를 보내며 든 잡생각")
 
+# [변경] 아래 두 개가 매번 "반드시 포함"이라 거의 모든 보고서가 "지난번 ~은 해결됐지만..."
+# 으로 시작하고, 활동과 무관하게 "포링 젤리"/생산량 얘기로 수렴하는 원인이었다.
+# 이제 확률로만 등장시켜서, 나올 때도 있고 안 나올 때도 있게 한다. .env로 조정 가능.
+PREV_ISSUE_CALLBACK_PROBABILITY = float(os.getenv("PREV_ISSUE_CALLBACK_PROBABILITY", "0.4"))
+PRODUCTION_STATS_MENTION_PROBABILITY = float(os.getenv("PRODUCTION_STATS_MENTION_PROBABILITY", "0.35"))
+
 
 # 함수 시그니처에 mood 인자를 추가했습니다.
 def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info, stats, mood):
@@ -35,6 +43,21 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     location, activity, focus, state, _ = processor.get_aesun_detailed_schedule()
     status_header, status_topic_hint = _STATUS_HEADERS.get(state, _DEFAULT_STATUS_HEADER)
 
+    include_prev_callback = random.random() < PREV_ISSUE_CALLBACK_PROBABILITY
+    include_stats = random.random() < PRODUCTION_STATS_MENTION_PROBABILITY
+
+    stats_line = f"- 현재 생산 현황: {main_product} {count}건 달성 (목표 대비 {progress}%)\n\n" if include_stats else "\n"
+    prev_callback_rule = (
+        "- 이전 사건에 대한 후일담을 1~2문장 정도 자연스럽게 섞어라, 그때 느꼈던 감정도 살짝 곁들여라.\n"
+        if include_prev_callback else
+        "- 이전 사건은 이번 보고서에서 굳이 언급하지 않아도 된다 - 오늘 활동에 집중해서 써라.\n"
+    )
+    stats_rule = (
+        "- '오늘의 기분'과 '생산 현황'을 자연스럽게 녹여라.\n"
+        if include_stats else
+        "- 오늘은 생산 현황/젤리 얘기를 억지로 끌어오지 말고, 순수하게 오늘 활동과 기분 위주로 써라.\n"
+    )
+
     # LLM 시스템 프롬프트: mood 인자를 직접 사용하여 프롬프트 주입
     system_prompt = (
         "너는 가상의 회사 '포링푸드' 생산부 대리이자, 일상 속에서 희노애락을 느끼는 인간적인 '애순이'다.\n"
@@ -46,7 +69,7 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
         f"- 현재 심리: {focus}\n"
         f"- 현재 날씨: {weather_info}\n"
         f"- 우리 회사 주력 제품: {main_product}\n"
-        f"- 현재 생산 현황: {main_product} {count}건 달성 (목표 대비 {progress}%)\n\n"
+        f"{stats_line}"
         "--- [애순이의 캐릭터 특징] ---\n"
         "1. 주 6일 근무하는 생산부 대리. 업무 스트레스와 일상의 소소한 행복(커피, 농담 등)을 동시에 느낀다.\n"
         "2. 라그나로크M도 하고 영화/데이트/독서/운동/친구모임 등 다양한 개인 생활도 즐기는 평범한 사람이다.\n"
@@ -54,8 +77,9 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
         "4. **매우 중요**: 오늘 기분이 안 좋더라도 무조건 부정적으로만 쓰지 마라. 기분이 {mood}이므로, 이를 애순이 특유의 방식으로 유머러스하게 승화하거나, '그래도 퇴근 후엔 보상받을 거야'라는 긍정적인 반전을 반드시 포함해라.\n\n"
         "작성 지침:\n"
         "- 제공된 [오늘의 사건]을 바탕으로 애순이의 독백을 작성해라.\n"
-        "- 이전 사건에 대한 후일담을 1~2문장에 반드시 포함하며, 그때 느꼈던 감정을 섞어라.\n"
-        "- '오늘의 기분'과 '생산 현황'을 반영하여 보고서를 작성해라.\n"
+        f"{prev_callback_rule}"
+        f"{stats_rule}"
+        "- 매번 똑같은 표현/문장 구조를 반복하지 말고, 오늘 활동에 맞는 새로운 소재와 어휘로 써라.\n"
         f"- **중요**: 마지막 'game_status' 필드는 반드시 \"{status_topic_hint}\"에 대한 내용으로 채워라. "
         f"오늘 애순이는 '{state}'({activity}) 중이라 게임과 무관한 날일 수 있다 - 게임 중이 아닐 때는 "
         "게임 얘기를 억지로 끌어오지 말고, 실제 오늘 활동에 대한 짧은 소감으로 채워라.\n"
