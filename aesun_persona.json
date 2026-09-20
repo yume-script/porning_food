@@ -23,6 +23,6 @@
       "체력 부족으로 멀티비타민, 유산균, 루테인 3종 세트 입에 털어 넣고 밤샘 공성전 준비 완료",
       "가시 돋친 무카 대리 피해서 구석 자리에 몰래 고속 충전기 꽂아두고 라그M 구동 중"
     ],
-    "formatting_template": "[📢 애순이 대리의 실시간 포링푸드 폭로 보고]\n\n🕒 시간: {current_time}\n📌 현장 상황: {title}\n\n💬 애순이의 한마디:\n\"{narrative}\"\n\n🎮 나의 라그M 상태:\n- {ragnarok_status}\n- (한줄 요약: {cynical_thought})"
+    "formatting_template": "[📢 애순이 대리의 실시간 포링푸드 폭로 보고]\n\n🕒 시간: {current_time}\n📌 현장 상황: {title}\n\n💬 애순이의 한마디:\n\"{narrative}\"\n\n{status_header}:\n- {ragnarok_status}\n- (한줄 요약: {cynical_thought})"
   }
 }

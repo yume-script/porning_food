@@ -309,6 +309,12 @@ def save_current_issue(issue):
 # 카테고리를 넓히고 확률도 올려서 이제 절반 이상은 회사 밖 이야기가 섞이도록 함.
 EXTERNAL_TOPIC_PROBABILITY = float(os.getenv("EXTERNAL_TOPIC_PROBABILITY", "0.6"))
 
+# [변경] 경쟁사 비교(rival_block)를 예전엔 매번 프롬프트에 무조건 끼워넣었다 - 결과적으로
+# 거의 모든 보고서가 "경쟁사 지표" 얘기로 끌려가는 원인이 됨(프롬프트에 항상 존재하는
+# 내용은 LLM이 언급할 확률이 높아진다). 이제 이 확률로만 등장시켜서 가끔 나오는
+# 배경 정보 수준으로 낮춘다. .env의 RIVAL_MENTION_PROBABILITY로 조정 가능.
+RIVAL_MENTION_PROBABILITY = float(os.getenv("RIVAL_MENTION_PROBABILITY", "0.3"))
+
 # 카테고리별 검색 가이드. 무작위로 하나 골라서 그 분야의 오늘자 화제를 가져옴.
 _TOPIC_CATEGORIES = {
     "사회": "가볍고 무난한 사회적 이슈나 화제 뉴스 (생활/문화/유행/훈훈한 미담 위주)",
@@ -384,9 +390,12 @@ def generate_dynamic_issue(org_data, weather_info, factory_status, our_count=0):
             "그냥 '아 이런 거 봤는데' 수준의 개인적인 감상/잡담으로 등장해도 좋다).\n"
         )
 
-    # 경쟁사 동향 - 날씨처럼 항상 배경정보로 곁들임 (회사일에 대한 경각심)
-    rival_report = get_rival_performance_report(our_count)
-    rival_block = _format_rival_block(rival_report)
+    # [변경] 경쟁사 동향 - 예전엔 매번 넣었는데, RIVAL_MENTION_PROBABILITY 확률로만 등장시켜서
+    # 매 보고서가 "경쟁사 지표" 얘기로 끌려가지 않게 함.
+    rival_block = ""
+    if random.random() < RIVAL_MENTION_PROBABILITY:
+        rival_report = get_rival_performance_report(our_count)
+        rival_block = _format_rival_block(rival_report)
 
     prompt = (
         f"너는 '포링푸드'의 인간미 넘치는 애순이다.\n"
