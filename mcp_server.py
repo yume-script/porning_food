@@ -17,8 +17,6 @@ character 파라미터로 아무나 조회할 수 있게 넓혔다(기본값은 
 돌아간다(main.py의 로테이션) - 방송 안 된 인물의 근황이 궁금하면 get_character_story()가
 그 자리에서 즉석으로 짧은 이야기를 만들어준다(같은 시간대 안에서는 캐시 재사용).
 """
-from __future__ import annotations
-
 import glob
 import json
 import os
