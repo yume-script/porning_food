@@ -138,12 +138,13 @@ def main():
     now = datetime.now()
     now_str = now.isoformat()
 
-    # [통계] 생산량 및 오늘의 기분 가져오기
+    # [통계] 생산량/영업 판매수량 및 오늘의 기분 가져오기
     prod_count, progress_rate = processor.get_production_stats()
     stats = (prod_count, progress_rate)
+    sales_count = processor.get_sales_stats()
     mood = processor.get_daily_mood()
 
-    print(f"[통계] 현재 생산량: {prod_count}건 ({progress_rate}%)")
+    print(f"[통계] 현재 생산량: {prod_count}건 ({progress_rate}%) / 영업 판매수량: {sales_count}건")
     print(f"[감정] 오늘의 애순이: {mood}")
 
     # 2. 취침 중일 경우 처리 (기존과 동일 - 스포트라이트 로테이션 없음)
@@ -195,7 +196,7 @@ def main():
     if is_aesun_spotlight:
         print("[3/4] 애순이 시점으로 보고서 변환 중...")
         report_data = generator.generate_aesun_report(
-            dynamic_issue, time_tag, org_data, persona_data, weather_info, stats, mood
+            dynamic_issue, time_tag, org_data, persona_data, weather_info, stats, mood, sales_count
         )
         status_payload = {
             "timestamp": now_str,

@@ -31,6 +31,12 @@ INTERACTION_HOURS = {
     int(h.strip()) for h in os.getenv("INTERACTION_HOURS", "10,15,20").split(",") if h.strip()
 }
 
+# [신규] "생산량"/"영업 판매수량"을 랜덤 대신 discord_bot_v2의 실제 대화 로그(SQLite)에서
+# 가져온다 - 원래 지메일 API(OAuth)로 하려다, 이미 다른 프로젝트에서 OAuth 쿼터를 많이 쓰고
+# 있고 게시 안 된 앱은 refresh_token이 7일마다 만료돼서 자동화에 안 맞아 포기했다. 이미
+# 연동되어 있는 discord_bot_v2의 파일을 직접 읽는 쪽이 새 인증 없이 훨씬 간단하다.
+DISCORD_BOT_V2_DB_PATH = os.getenv("DISCORD_BOT_V2_DB_PATH", "/mnt/discord_bot_v2/storage/conversations.db")
+
 
 def load_env(filepath):
     env_vars = {}

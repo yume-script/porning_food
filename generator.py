@@ -29,10 +29,12 @@ PRODUCTION_STATS_MENTION_PROBABILITY = float(os.getenv("PRODUCTION_STATS_MENTION
 
 
 # 함수 시그니처에 mood 인자를 추가했습니다.
-def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info, stats, mood):
+def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info, stats, mood, sales_count=0):
     """
     processor에서 생성된 '이전 사건 후일담', '오늘의 기분', '생산 통계'를 바탕으로
     애순이의 인간적인 희노애락이 담긴 1인칭 보고서를 생성합니다.
+    sales_count: 오늘 "영업 판매수량"(discord_bot_v2 대화로그의 봇 응답 건수 기반) - 생산량과
+    같은 확률(PRODUCTION_STATS_MENTION_PROBABILITY)로 같이 언급되거나 같이 빠진다.
     """
     count, progress = stats  # 생산량 통계 언패킹
     main_product = org_data.get("main_product", "포링 젤리")
@@ -46,16 +48,19 @@ def generate_aesun_report(issue, time_tag, org_data, persona_data, weather_info,
     include_prev_callback = random.random() < PREV_ISSUE_CALLBACK_PROBABILITY
     include_stats = random.random() < PRODUCTION_STATS_MENTION_PROBABILITY
 
-    stats_line = f"- 현재 생산 현황: {main_product} {count}건 달성 (목표 대비 {progress}%)\n\n" if include_stats else "\n"
+    stats_line = (
+        f"- 현재 생산 현황: {main_product} {count}건 달성 (목표 대비 {progress}%)\n"
+        f"- 오늘 영업 판매수량: {sales_count}건\n\n"
+    ) if include_stats else "\n"
     prev_callback_rule = (
         "- 이전 사건에 대한 후일담을 1~2문장 정도 자연스럽게 섞어라, 그때 느꼈던 감정도 살짝 곁들여라.\n"
         if include_prev_callback else
         "- 이전 사건은 이번 보고서에서 굳이 언급하지 않아도 된다 - 오늘 활동에 집중해서 써라.\n"
     )
     stats_rule = (
-        "- '오늘의 기분'과 '생산 현황'을 자연스럽게 녹여라.\n"
+        "- '오늘의 기분'과 '생산 현황'/'영업 판매수량'을 자연스럽게 녹여라.\n"
         if include_stats else
-        "- 오늘은 생산 현황/젤리 얘기를 억지로 끌어오지 말고, 순수하게 오늘 활동과 기분 위주로 써라.\n"
+        "- 오늘은 생산 현황/판매수량/젤리 얘기를 억지로 끌어오지 말고, 순수하게 오늘 활동과 기분 위주로 써라.\n"
     )
 
     # LLM 시스템 프롬프트: mood 인자를 직접 사용하여 프롬프트 주입

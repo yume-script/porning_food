@@ -3,16 +3,18 @@ import re
 import requests
 import json
 import os
-from datetime import datetime, timedelta
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
-from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL, SEARCH_MODEL
+from config import API_URL, LITELLM_MASTER_KEY, LLM_MODEL, SEARCH_MODEL, DISCORD_BOT_V2_DB_PATH
 
 # .env 로드
 load_dotenv()
 
 ISSUE_LOG_FILE = "last_issue.json"
 KATALK_LOG_DIR = "/mnt/discord_bot/katalk_log"
+KST = timezone(timedelta(hours=9))
 
 # 이 길드(디스코드 서버) 전체로 들어오는 입력을 "고객의 요청사항"으로 간주.
 # https://discord.com/channels/{길드ID}/{채널ID} 에서 길드ID 부분.
@@ -25,41 +27,52 @@ DAILY_TARGET = int(os.getenv("DAILY_TARGET_PRODUCTION", 1000))
 _LIVE_LOG_FILENAME_RE = re.compile(r"^log_(\d+)\.jsonl$")
 
 
+def _count_discord_bot_v2_messages(direction: str) -> int:
+    """
+    [신규] discord_bot_v2의 conversations.db(SQLite, messages 테이블)에서 오늘(KST)
+    메시지 수를 direction별로 센다. direction='in'(유저가 보낸 것)은 생산량, 'out'
+    (아메하나/애순이가 응답한 것)은 영업 판매수량으로 쓴다.
+
+    [변경] 원래 지메일 API(OAuth)로 하려다, 이미 다른 프로젝트에서 OAuth 쿼터를 많이
+    쓰고 있고 게시 안 된 앱은 refresh_token이 7일마다 만료돼서 자동화에 안 맞아 포기했다.
+    이미 연동되어 있는 discord_bot_v2의 SQLite 파일을 직접 읽는 쪽이 새 인증 없이 훨씬
+    간단하다. ts 컬럼이 이미 KST(+09:00)로 저장되어 있어서(discord_bot_v2 쪽에서 타임존
+    버그를 고친 뒤부터) 문자열 앞부분(YYYY-MM-DD)만 비교해도 "오늘" 판정이 정확하다.
+    """
+    if not os.path.exists(DISCORD_BOT_V2_DB_PATH):
+        print(f"[경고] discord_bot_v2 DB를 못 찾음: {DISCORD_BOT_V2_DB_PATH}")
+        return 0
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    try:
+        conn = sqlite3.connect(f"file:{DISCORD_BOT_V2_DB_PATH}?mode=ro", uri=True)
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE direction = ? AND ts LIKE ?",
+                (direction, f"{today_str}%"),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[경고] discord_bot_v2 DB 조회 실패: {e}")
+        return 0
+
+
 def get_production_stats():
     """
-    특정 길드(TARGET_GUILD_ID) 전체 채널로 들어온 오늘자 메시지를 전부
-    "고객의 요청사항"으로 간주해 개수를 세고, 목표 대비 진행률을 계산한다.
-    (기존에는 카톡방 하나(log_18221226698539974.jsonl)만 셌었음)
+    [변경] 원래는 카톡 로그를 직접 스캔했는데, discord_bot_v2가 이미 conversations.db에
+    카톡+디스코드 메시지를 전부 기록해두고 있어서 그걸 그대로 쓴다. 오늘(KST) 유저가 보낸
+    메시지 수(direction='in')를 "생산량"으로 삼는다.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    count = 0
-    try:
-        if os.path.isdir(KATALK_LOG_DIR):
-            for fname in os.listdir(KATALK_LOG_DIR):
-                if not _LIVE_LOG_FILENAME_RE.match(fname):
-                    continue  # 월별 아카이브 등은 제외, 원본 로그만 스캔
-                fpath = os.path.join(KATALK_LOG_DIR, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        for line in f:
-                            if not line.strip():
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            if entry.get("guild_id") != TARGET_GUILD_ID:
-                                continue
-                            timestamp_str = entry.get("timestamp", "")
-                            if timestamp_str.startswith(today_str):
-                                count += 1
-                except Exception as e:
-                    print(f"[경고] {fname} 분석 중 오류: {e}")
-    except Exception as e:
-        print(f"[경고] 로그 디렉토리 스캔 중 오류: {e}")
-
+    count = _count_discord_bot_v2_messages("in")
     progress = (count / DAILY_TARGET) * 100 if DAILY_TARGET > 0 else 0
     return count, round(progress, 1)
+
+
+def get_sales_stats():
+    """오늘(KST) 아메하나/애순이가 응답한 메시지 수(direction='out')를 "영업 판매수량"으로 삼는다."""
+    return _count_discord_bot_v2_messages("out")
 
 
 # =============================================================================
